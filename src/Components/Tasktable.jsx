@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { toast } from "react-toastify";
+import { toast, ToastContainer } from "react-toastify";
 import { ReactTabulator } from "react-tabulator";
+import "react-toastify/dist/ReactToastify.css";
 import "react-tabulator/lib/styles.css";
 import "react-tabulator/css/tabulator.min.css";
 import "../App.css";
@@ -8,8 +9,11 @@ import "../App.css";
 const Tasktable = () => {
   const [tasks, setTasks] = useState([]);
   const [filter, setFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState(""); // New status filter state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTask, setNewTask] = useState({ title: "", status: "To Do" });
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState(null);
 
   useEffect(() => {
     fetch("https://jsonplaceholder.typicode.com/todos")
@@ -25,18 +29,41 @@ const Tasktable = () => {
       );
   }, []);
 
-  const handleAddTask = () => {
+  const handleAddOrUpdateTask = () => {
     if (!newTask.title.trim()) {
       toast.error("Task title is required!");
       return;
     }
-    setTasks((prev) => [
-      { id: tasks.length + 1, title: newTask.title, status: newTask.status },
-      ...prev,
-    ]);
-    toast.success("Task added successfully!");
+
+    if (isEditing) {
+      setTasks((prev) =>
+        prev.map((task) =>
+          task.id === editingTaskId ? { ...task, ...newTask } : task
+        )
+      );
+      toast.success("Task updated successfully!");
+    } else {
+      setTasks((prev) => [
+        { id: tasks.length + 1, title: newTask.title, status: newTask.status },
+        ...prev,
+      ]);
+      toast.success("Task added successfully!");
+    }
+
     setIsModalOpen(false);
     setNewTask({ title: "", status: "To Do" });
+    setIsEditing(false);
+    setEditingTaskId(null);
+  };
+
+  const handleEditTask = (id) => {
+    const taskToEdit = tasks.find((task) => task.id === id);
+    if (taskToEdit) {
+      setNewTask({ title: taskToEdit.title, status: taskToEdit.status });
+      setIsEditing(true);
+      setEditingTaskId(id);
+      setIsModalOpen(true);
+    }
   };
 
   const handleDeleteTask = (id) => {
@@ -44,8 +71,19 @@ const Tasktable = () => {
     toast.error("Task deleted.");
   };
 
-  const filteredTasks = tasks.filter((task) =>
-    task.title.toLowerCase().includes(filter.toLowerCase())
+  const filteredTasks = tasks.filter(
+    (task) =>
+      task.title.toLowerCase().includes(filter.toLowerCase()) &&
+      (statusFilter ? task.status === statusFilter : true)
+  );
+
+  // Compute task counts for each status
+  const taskCounts = tasks.reduce(
+    (counts, task) => {
+      counts[task.status] = (counts[task.status] || 0) + 1;
+      return counts;
+    },
+    { "To Do": 0, "In Progress": 0, "Done": 0 }
   );
 
   const columns = [
@@ -70,17 +108,40 @@ const Tasktable = () => {
       title: "Actions",
       field: "actions",
       formatter: () => {
-        return `<button class="bg-red-500 text-white px-2 py-1 rounded">Delete</button>`;
+        return `
+          <button class="bg-yellow-500 text-white px-2 py-1 rounded mr-2">Edit</button>
+          <button class="bg-red-500 text-white px-2 py-1 rounded">Delete</button>
+        `;
       },
       cellClick: (e, cell) => {
         const id = cell.getRow().getData().id;
-        handleDeleteTask(id);
+        if (e.target.textContent === "Edit") {
+          handleEditTask(id);
+        } else if (e.target.textContent === "Delete") {
+          handleDeleteTask(id);
+        }
       },
     },
   ];
 
   return (
     <div className="p-6 bg-gray-100">
+      <ToastContainer autoClose={1000} />
+      <div className="mb-4">
+        <h2 className="mb-2 text-lg font-bold">Task Summary</h2>
+        <div className="flex gap-4">
+          <p className="p-2 text-blue-800 bg-blue-100 rounded">
+            To Do: {taskCounts["To Do"]}
+          </p>
+          <p className="p-2 text-yellow-800 bg-yellow-100 rounded">
+            In Progress: {taskCounts["In Progress"]}
+          </p>
+          <p className="p-2 text-green-800 bg-green-100 rounded">
+            Done: {taskCounts["Done"]}
+          </p>
+        </div>
+      </div>
+
       <div className="flex justify-between mb-4">
         <input
           type="text"
@@ -89,8 +150,22 @@ const Tasktable = () => {
           onChange={(e) => setFilter(e.target.value)}
           className="p-2 border rounded"
         />
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="p-2 border rounded"
+        >
+          <option value="">All Statuses</option>
+          <option value="To Do">To Do</option>
+          <option value="Done">Done</option>
+          <option value="In Progress">In Progress</option>
+        </select>
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => {
+            setIsModalOpen(true);
+            setIsEditing(false);
+            setNewTask({ title: "", status: "To Do" });
+          }}
           className="px-4 py-2 text-white bg-blue-500 rounded"
         >
           Add Task
@@ -115,7 +190,9 @@ const Tasktable = () => {
       {isModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
           <div className="p-6 bg-white rounded shadow-lg w-96">
-            <h2 className="mb-4 text-lg font-bold">Add New Task</h2>
+            <h2 className="mb-4 text-lg font-bold">
+              {isEditing ? "Edit Task" : "Add New Task"}
+            </h2>
             <input
               type="text"
               placeholder="Task Title"
@@ -144,7 +221,7 @@ const Tasktable = () => {
                 Cancel
               </button>
               <button
-                onClick={handleAddTask}
+                onClick={handleAddOrUpdateTask}
                 className="px-4 py-2 text-white bg-blue-500 rounded"
               >
                 Save
